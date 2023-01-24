@@ -11,7 +11,6 @@ logger.setLevel(logging.INFO)
 
 class DownloadTestCase(unittest.TestCase):
     ROOT_URL = 'https://raw.githubusercontent.com/mitchellkrogza/Phishing.Database/master'
-    IP_PHISH_ACTIVE = 'phishing-IPs-ACTIVE.txt'
 
     def setUp(self) -> None:
         self.author = Identity(
