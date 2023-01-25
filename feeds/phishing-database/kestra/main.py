@@ -8,6 +8,8 @@ from stix2 import Bundle, Identity, Indicator, IPv4Address,IPv6Address, Relation
 from sqlalchemy import create_engine
 import psycopg2
 from tabulate import tabulate
+from sqlalchemy import MetaData,Table
+from sqlalchemy.orm import sessionmaker
 
 import logging
 
@@ -27,7 +29,7 @@ DB_INIT = os.getenv('DB_INIT',default="false")
 
 engine = create_engine(f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
 
-def url_phishing_to_df()->pd.DataFrame:
+def url_phishing_to_df(filter='ipv4')->pd.DataFrame:
     rows = []
     for status in ['ACTIVE', 'INACTIVE', 'INVALID']:
         logger.info(f'IP {status}')
@@ -39,21 +41,32 @@ def url_phishing_to_df()->pd.DataFrame:
                 ipstr = line.strip()
 
                 if len(ipstr) > 0:
-                    if validators.ip_address.ipv4(ipstr):
+                    if filter == 'ipv4' and validators.ip_address.ipv4(ipstr):
                         row = {'ipv4':ipstr,'status':status}
-                    if validators.ip_address.ipv6(ipstr):
+                        row['created_at'] = pd.Timestamp.utcnow()
+                        row['updated_at'] = None
+                        row['deleted_at'] = None
+                        rows.append(row)
+                    elif filter == 'ipv6' and  validators.ip_address.ipv6(ipstr):
                         row = {'ipv6':ipstr,'status':status}
-                    row['created_at'] = pd.Timestamp.utcnow()
-                    row['updated_at'] = None
-                    row['deleted_at'] = None
+                        row['created_at'] = pd.Timestamp.utcnow()
+                        row['updated_at'] = None
+                        row['deleted_at'] = None
+                        rows.append(row)
+                    else:
+                        continue
+    # deduplicate
+    df = pd.DataFrame(rows)
+    if filter == 'ipv4':
+        df.drop_duplicates(subset=['ipv4','status'], keep='last',inplace=True)
+    if filter == 'ipv6':
+        df.drop_duplicates(subset=['ipv6', 'status'], keep='last', inplace=True)
+    return df
 
-                    rows.append(row)
-    return pd.DataFrame(rows)
-
-def init_database(df):
-    col_types = {'ipv4':String(),'status':String(),'created_at':DateTime(),'updated_at':DateTime(),'deleted_at':DateTime()}
+def init_database(df,filter='ipv4'):
+    col_types = {filter:String(),'status':String(),'created_at':DateTime(),'updated_at':DateTime(),'deleted_at':DateTime()}
     # Drop old table and create new empty table
-    total = df.to_sql('phishing_database', engine, if_exists='replace', index=False,method='multi',chunksize=100,dtype=col_types)
+    total = df.to_sql('phishing_database_ipv4', engine, if_exists='replace', index=False,method='multi',chunksize=100,dtype=col_types)
     return total
 
 
@@ -73,20 +86,35 @@ def diff_tables(prev_df,curr_df):
 
     logger.info(f'Total merge {merge_df.shape[0]}')
     table_ascii = tabulate(merge_df.sample(10), headers='keys', tablefmt='psql')
-    # filter the identical rows....
+    # IPs where the status has not changed
     same_df = merge_df[merge_df.status_old == merge_df.status_now]
+    same_df['updated_at'] = pd.Timestamp.utcnow()
+    added_df = merge_df[(merge_df.status_old==None) & (merge_df.status_now!=None)]
+    removed_df = merge_df[(merge_df.status_old != None) & (merge_df.status_now == None)]
+
     logger.info(f"\n{table_ascii}\n")
-    return same_df
+    return same_df,added_df,removed_df
+
+def dataframe_update(df, table, engine, primary_key, column):
+  md = MetaData(engine)
+  table = Table(table, md, autoload=True)
+  session = sessionmaker(bind=engine)()
+  for index, row in df.iterrows():
+    session.query(table).filter(table.columns[primary_key] == index).update({column: row[column]})
+  session.commit()
 
 if DB_INIT=='true':
-    current_df = url_phishing_to_df()
-    totals = init_database(current_df)
+    current_df = url_phishing_to_df(filter='ipv4')
+    totals = init_database(current_df,filter)
     logger.info(f'Total entities {totals}')
 else:
-    current_df = url_phishing_to_df()
-    previous_df = pd.read_sql_table('phishing_database',engine)
-    (same_df) = diff_tables(previous_df,current_df)
-    logger.info(f'Total previous entities {previous_df.shape[0]}')
-    logger.info(f'Total current entities {current_df.shape[0]}')
-    logger.info(f'Unchanged {same_df.shape[0]}')
-    print_table(current_df)
+    current_df = url_phishing_to_df(filter='ipv4')
+    previous_df = pd.read_sql_table('phishing_database_ipv4',engine)
+    (same_df,added_df,removed_df) = diff_tables(previous_df,current_df)
+    dataframe_update(same_df,'phishing_database_ipv4',engine,'ipv4','updated_at')
+    logger.info(f'Previous entities {previous_df.shape[0]}')
+    logger.info(f'Current entities {current_df.shape[0]}')
+    logger.info(f'Identical {same_df.shape[0]}')
+    logger.info(f'Added {added_df.shape[0]}')
+    logger.info(f'Removed {removed_df.shape[0]}')
+    print_table(same_df)
