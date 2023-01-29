@@ -10,6 +10,8 @@ import psycopg2
 from tabulate import tabulate
 from sqlalchemy import MetaData,Table
 from sqlalchemy.orm import sessionmaker
+from abc import ABC, abstractmethod
+from distutils.util import strtobool
 
 import logging
 
@@ -17,62 +19,103 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-ROOT_URL = 'https://raw.githubusercontent.com/mitchellkrogza/Phishing.Database/master'
 
 DB_USER = os.getenv('DB_USER','admin')
 DB_PASSWORD = os.getenv('DB_PASSWORD','admin')
 DB_HOST = os.getenv('DB_HOST','localhost')
 DB_PORT = os.getenv('DB_PORT','5432')
 DB_NAME = os.getenv('DB_NAME',default="fastapi")
-DB_INIT = os.getenv('DB_INIT',default="false")
+DB_INIT = strtobool(os.getenv('DB_INIT',default="false"))
 #DB_INIT = os.getenv('DB_INIT',default="true")
+ROOT_URL = 'https://raw.githubusercontent.com/mitchellkrogza/Phishing.Database/master'
 
-engine = create_engine(f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
+class FileSource():
 
-def url_phishing_to_df(filter='ipv4')->pd.DataFrame:
-    rows = []
-    for status in ['ACTIVE', 'INACTIVE', 'INVALID']:
-        logger.info(f'IP {status}')
-        r = requests.get(f"{ROOT_URL}/phishing-IPs-{status}.txt")
+    def __init__(self,name:str):
+        self._engine = create_engine(f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
+        self._name = name
+        self._schame = {}
 
-        if r.status_code == 200:
-            total = 0
-            for line in r.content.decode().split('\n'):
-                ipstr = line.strip()
+    def init_local(self,df) ->int:
+        # Drop old table and create new empty table
+        total = df.to_sql(self._name, self._engine, if_exists='replace', index=False, dtype=self._schema)
+        return total
 
-                if len(ipstr) > 0:
-                    if filter == 'ipv4' and validators.ip_address.ipv4(ipstr):
-                        row = {'ipv4':ipstr,'status':status}
-                        row['created_at'] = pd.Timestamp.utcnow()
-                        row['updated_at'] = None
-                        row['deleted_at'] = None
-                        rows.append(row)
-                    elif filter == 'ipv6' and  validators.ip_address.ipv6(ipstr):
-                        row = {'ipv6':ipstr,'status':status}
-                        row['created_at'] = pd.Timestamp.utcnow()
-                        row['updated_at'] = None
-                        row['deleted_at'] = None
-                        rows.append(row)
-                    else:
-                        continue
-    # deduplicate
-    df = pd.DataFrame(rows)
-    if filter == 'ipv4':
-        df.drop_duplicates(subset=['ipv4','status'], keep='last',inplace=True)
-    if filter == 'ipv6':
+    @abstractmethod
+    def pull_source(self,init:bool)->pd.DataFrame:
+        pass
+
+    @abstractmethod
+    def pull_local(self)->pd.DataFrame:
+        pass
+
+    def log_table(self,df,n=5):
+        table_ascii = tabulate(df.sample(n), headers='keys', tablefmt='psql')
+        logger.info(f"\n{table_ascii}\n")
+
+class Ipv4Phishing(FileSource):
+    _schema = {'ipv4': String(), 'status': String(), 'created_at': DateTime(), 'updated_at': DateTime(),
+                     'deleted_at': DateTime()}
+
+    def pull_source(self,init=DB_INIT) ->pd.DataFrame:
+        rows = []
+        for status in ['ACTIVE', 'INACTIVE', 'INVALID']:
+            logger.info(f'IP {status}')
+            r = requests.get(f"{ROOT_URL}/phishing-IPs-{status}.txt")
+
+            if r.status_code == 200:
+                for line in r.content.decode().split('\n'):
+                    ipstr = line.strip()
+
+                    if len(ipstr) > 0:
+                        if validators.ip_address.ipv4(ipstr):
+                            row = {'ipv4': ipstr, 'status': status}
+                            row['created_at'] = pd.Timestamp.utcnow()
+                            row['updated_at'] = None
+                            row['deleted_at'] = None
+                            rows.append(row)
+                        else:
+                            continue
+        # deduplicate
+        df = pd.DataFrame(rows)
+        df.drop_duplicates(subset=['ipv4', 'status'], keep='last', inplace=True)
+        if init:
+            total = self.init_local(df)
+            logger.info(f'Loaded {total} IPV4 strings')
+        logger.info(f'Pulled {df.shape[0]} IPV4 strings')
+        return df
+
+class Ipv6Phishing(FileSource):
+    _schema = {'ipv6': String(), 'status': String(), 'created_at': DateTime(), 'updated_at': DateTime(),
+                     'deleted_at': DateTime()}
+
+    def pull_source(self,init=DB_INIT) ->pd.DataFrame:
+        rows = []
+        for status in ['ACTIVE', 'INACTIVE', 'INVALID']:
+            logger.info(f'IP {status}')
+            r = requests.get(f"{ROOT_URL}/phishing-IPs-{status}.txt")
+
+            if r.status_code == 200:
+                for line in r.content.decode().split('\n'):
+                    ipstr = line.strip()
+
+                    if len(ipstr) > 0:
+                        if validators.ip_address.ipv6(ipstr):
+                            row = {'ipv6': ipstr, 'status': status}
+                            row['created_at'] = pd.Timestamp.utcnow()
+                            row['updated_at'] = None
+                            row['deleted_at'] = None
+                            rows.append(row)
+                        else:
+                            continue
+        # deduplicate
+        df = pd.DataFrame(rows)
         df.drop_duplicates(subset=['ipv6', 'status'], keep='last', inplace=True)
-    return df
-
-def init_database(df,filter='ipv4'):
-    col_types = {filter:String(),'status':String(),'created_at':DateTime(),'updated_at':DateTime(),'deleted_at':DateTime()}
-    # Drop old table and create new empty table
-    total = df.to_sql('phishing_database_ipv4', engine, if_exists='replace', index=False,method='multi',chunksize=100,dtype=col_types)
-    return total
-
-
-def print_table(df,n=5):
-    table_ascii = tabulate(df.sample(n), headers='keys', tablefmt='psql')
-    logger.info(f"\n{table_ascii}\n")
+        if init:
+            total = self.init_local(df)
+            logger.info(f'Loaded {total} IPV6 strings')
+        logger.info(f'Pulled {df.shape[0]} IPV6 strings')
+        return df
 
 def diff_tables(prev_df,curr_df):
     # sanity check like empty strings?
@@ -103,18 +146,25 @@ def dataframe_update(df, table, engine, primary_key, column):
     session.query(table).filter(table.columns[primary_key] == index).update({column: row[column]})
   session.commit()
 
-if DB_INIT=='true':
-    current_df = url_phishing_to_df(filter='ipv4')
-    totals = init_database(current_df,filter)
-    logger.info(f'Total entities {totals}')
-else:
-    current_df = url_phishing_to_df(filter='ipv4')
-    previous_df = pd.read_sql_table('phishing_database_ipv4',engine)
-    (same_df,added_df,removed_df) = diff_tables(previous_df,current_df)
-    dataframe_update(same_df,'phishing_database_ipv4',engine,'ipv4','updated_at')
-    logger.info(f'Previous entities {previous_df.shape[0]}')
-    logger.info(f'Current entities {current_df.shape[0]}')
-    logger.info(f'Identical {same_df.shape[0]}')
-    logger.info(f'Added {added_df.shape[0]}')
-    logger.info(f'Removed {removed_df.shape[0]}')
-    print_table(same_df)
+def old():
+    if DB_INIT:
+        current_df = url_phishing_to_df(filter='ipv4')
+        totals = init_database(current_df,filter)
+        logger.info(f'Total entities {totals}')
+    else:
+        current_df = url_phishing_to_df(filter='ipv4')
+        previous_df = pd.read_sql_table('phishing_database_ipv4',engine)
+        (same_df,added_df,removed_df) = diff_tables(previous_df,current_df)
+        dataframe_update(same_df,'phishing_database_ipv4',engine,'ipv4','updated_at')
+        logger.info(f'Previous entities {previous_df.shape[0]}')
+        logger.info(f'Current entities {current_df.shape[0]}')
+        logger.info(f'Identical {same_df.shape[0]}')
+        logger.info(f'Added {added_df.shape[0]}')
+        logger.info(f'Removed {removed_df.shape[0]}')
+        print_table(same_df)
+
+source1 = Ipv4Phishing(name='phishing_database_ipv4')
+source1.pull_source()
+
+source2 = Ipv6Phishing(name='phishing_database_ipv6')
+source2.pull_source()
