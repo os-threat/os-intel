@@ -3,6 +3,13 @@
 The following repository is used to store the Os Intel connectors for the platform integration 
 with external sources of intel. 
 
+## Install STIXORM
+
+Requires python 3.10
+
+pip install -i https://test.pypi.org/simple/ stixorm==0.1.3a0
+
+
 ## Feeds list and statuses
 
 This repository is used to host OSINT and paid (BYOL) feeds
