@@ -5,3 +5,8 @@ pandas
 psycopg2-binary
 sqlalchemy
 tabulate
+returns
+typedb-client
+loguru
+pydantic
+networkx
