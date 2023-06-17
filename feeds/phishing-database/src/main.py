@@ -56,9 +56,9 @@ class Loader():
                             if validators.ip_address.ipv4(ipstr):
                                 observable = IPv4Address(value=ipstr)
                                 feedObservation = ThreatSubObject(
-                                    first_observed=utils.get_timestamp(),
-                                    last_observed=utils.get_timestamp(),
-                                    number_observed=1,
+                                    # first_observed=utils.get_timestamp(),
+                                    # last_observed=utils.get_timestamp(),
+                                    # number_observed=1,
                                     # created_by_ref=self.author,
                                     object_ref=observable.id,
                                 )
@@ -66,9 +66,9 @@ class Loader():
                             elif validators.ip_address.ipv6(ipstr):
                                 observable = IPv6Address(value=ipstr)
                                 feedObservation = ThreatSubObject(
-                                    first_observed=utils.get_timestamp(),
-                                    last_observed=utils.get_timestamp(),
-                                    number_observed=1,
+                                    # first_observed=utils.get_timestamp(),
+                                    # last_observed=utils.get_timestamp(),
+                                    # number_observed=1,
                                     # created_by_ref=self.author,
                                     object_ref=observable.id,
                                 )
@@ -101,7 +101,7 @@ class Loader():
                           lang="en",
                           external_references=[info],
                           object_marking_refs=[marking_def_statement],
-                          contents=[observables])
+                          contents=observables)
 
             yield a_feed
 
