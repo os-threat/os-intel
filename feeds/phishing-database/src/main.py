@@ -42,7 +42,8 @@ class Loader():
             logger.info(f'IP {status}')
             r = requests.get(f"{self.ROOT_URL}/phishing-IPs-{status}.txt")
             observables = []
-
+            sdos = []
+            total = 0
             if r.status_code == 200:
 
                 for line in r.content.decode().split('\n'):
@@ -51,54 +52,66 @@ class Loader():
                     if len(ipstr)>0:
                         try:
                             if validators.ip_address.ipv4(ipstr):
-                                observable = IPv4Address(value=ipstr)
-                                feedObservation = ThreatSubObject(
-                                    first_observed=utils.get_timestamp(),
-                                    last_observed=utils.get_timestamp(),
-                                    number_observed=1,
-                                    #created_by_ref=self.author,
-                                    object_ref=observable.id
-                                )
-                                observables.append(feedObservation)
+                                sdo = IPv4Address(value=ipstr)
+                                observables.append(sdo)
+                                sdos.append(sdo)
+
                             elif validators.ip_address.ipv6(ipstr):
-                                observable = IPv6Address(value=ipstr)
-                                feedObservation = ThreatSubObject(
-                                    first_observed=utils.get_timestamp(),
-                                    last_observed=utils.get_timestamp(),
-                                    number_observed=1,
-                                    #created_by_ref=self.author,
-                                    object_ref=observable.id
-                                )
-                                observables.append(feedObservation)
+                                sdo = IPv6Address(value=ipstr)
+                                observables.append(sdo)
+                                sdos.append(sdo)
+
                         except Exception as e:
                             logger.error(e)
-                            #logger.error(f"Invalid IP address {ipstr}")
+
+                assert len(observables) > 0
+                observations = ObservedData(
+                    first_observed=utils.get_timestamp(),
+                    last_observed=utils.get_timestamp(),
+                    number_observed=len(observables),
+                    created_by_ref=self.author,
+                    object_refs=observables
+                )
+
+                subobs = []
+                for sdo in sdos:
+                    subobj = ThreatSubObject(
+                        object_ref=sdo.id,
+                        created=utils.get_timestamp(),
+                        modified=utils.get_timestamp()
+                    )
+
+                    subobs.append(subobj)
+
+
+                info = ExternalReference(source_name=f"Phishing Database {status}",
+                                         external_id=f"phishing-IPs-{status}.txt",
+                                         url="https://github.com/mitchellkrogza/Phishing.Database/blob/master/phishing-IPs-ACTIVE.txt")
+
+                marking_def_statement = MarkingDefinition(
+                    id="marking-definition--d81f86b9-975b-4c0b-875e-810c5ad45a4f",
+                    created="2017-04-14T13:07:49.812Z",
+                    definition_type="statement",
+                    definition=StatementMarking("Copyright (c) Stark Industries 2017.")
+                )
+
+                a_feed = Feed(name='phishing-db',
+                              description="the phishing database",
+                              paid=False,
+                              free=False,
+                              created=utils.get_timestamp(),
+                              labels=[],
+                              lang="en",
+                              external_references=[info],
+                              object_marking_refs=[marking_def_statement],
+                              contents=subobs)
+
+                yield (a_feed,sdos,observations)
 
             else:
                 raise Exception('Feed URL is down')
 
-            info = ExternalReference(source_name=f"Phishing Database {status}",
-                                     external_id=f"phishing-IPs-{status}.txt",
-                                     url="https://github.com/mitchellkrogza/Phishing.Database/blob/master/phishing-IPs-ACTIVE.txt")
 
-            marking_def_statement = MarkingDefinition(
-                id="marking-definition--d81f86b9-975b-4c0b-875e-810c5ad45a4f",
-                created="2017-04-14T13:07:49.812Z",
-                definition_type="statement",
-                definition=StatementMarking("Copyright (c) Stark Industries 2017.")
-            )
-
-            a_feed = Feed(name='phishing-db',
-                          description="the phishing database",
-                          paid=False,
-                          free=False,
-                          labels=[],
-                          lang="en",
-                          external_references=[info],
-                          object_marking_refs=[marking_def_statement],
-                          contents=[observables])
-
-            yield a_feed
 
     def get_domain_phish(self,add_indicators=False):
 
@@ -201,47 +214,55 @@ class Loader():
         else:
             return Bundle(self.author, feedObservation, observables)
 
-def init_feeds(connection=url_typedb):
-    import_type = import_type_factory.get_all_imports()
-    typedb_source = TypeDBSource(connection, import_type)
-    typedb_sink = TypeDBSink(connection, True, import_type)
+    def init_feeds(self,connection=url_typedb,clear_all=True):
+        '''
+        Clear ALL will destroy the entire database and should be discouraged.
+        It will destroy all other feeds etc.
+
+        :param connection:
+        :param clear_all:
+        :return:
+        '''
+        import_type = import_type_factory.get_all_imports()
+        typedb_source = TypeDBSource(connection, import_type)
+        typedb_sink = TypeDBSink(connection,clear_all, import_type)
 
 
-    marking_def_statement = MarkingDefinition(
-        definition_type="statement",
-        definition=StatementMarking("Phishing Database...")
-    )
+        marking_def_statement = MarkingDefinition(
+            definition_type="statement",
+            definition=StatementMarking("Phishing Database...")
+        )
 
-    ip_a = ExternalReference(source_name="Phishing Database ACTIVE",
-                             external_id="phishing-IPs-ACTIVE.txt",
-                             url="https://github.com/mitchellkrogza/Phishing.Database/blob/master/phishing-IPs-ACTIVE.txt")
+        ip_a = ExternalReference(source_name="Phishing Database ACTIVE",
+                                 external_id="phishing-IPs-ACTIVE.txt",
+                                 url="https://github.com/mitchellkrogza/Phishing.Database/blob/master/phishing-IPs-ACTIVE.txt")
 
-    ip_ia = ExternalReference(source_name="Phishing Database ACTIVE",
-                             external_id="phishing-IPs-ACTIVE.txt",
-                             url="https://github.com/mitchellkrogza/Phishing.Database/blob/master/phishing-IPs-INACTIVE.txt")
+        ip_ia = ExternalReference(source_name="Phishing Database ACTIVE",
+                                 external_id="phishing-IPs-ACTIVE.txt",
+                                 url="https://github.com/mitchellkrogza/Phishing.Database/blob/master/phishing-IPs-INACTIVE.txt")
 
-    ip_in = ExternalReference(source_name="Phishing Database ACTIVE",
-                             external_id="phishing-IPs-ACTIVE.txt",
-                             url="https://github.com/mitchellkrogza/Phishing.Database/blob/master/phishing-IPs-INVALID.txt")
+        ip_in = ExternalReference(source_name="Phishing Database ACTIVE",
+                                 external_id="phishing-IPs-ACTIVE.txt",
+                                 url="https://github.com/mitchellkrogza/Phishing.Database/blob/master/phishing-IPs-INVALID.txt")
 
-    # create the Feeds object
-    feeds = Feeds(name='phishing-db',
-                  description="the phishing database",
-                  paid=False,
-                  free=True,
-                  labels=["active","inactive","invalid","ip"],
-                  lang="en",
-                  external_references=[ip_a,ip_ia,ip_in],
-                  object_marking_refs = [marking_def_statement],
-                  contained=[])
+        # create the Feeds object
+        feeds = Feeds(name='phishing-db',
+                      description="the phishing database",
+                      paid=False,
+                      free=True,
+                      labels=["active","inactive","invalid","ip"],
+                      lang="en",
+                      external_references=[ip_a,ip_ia,ip_in],
+                      object_marking_refs = [marking_def_statement],
+                      contained=[])
 
-    results = typedb_sink.add(feeds)
+        results = typedb_sink.add(feeds)
 
-    for result in results:
-        # TODO: check this runs good
-        logger.info(f"Status = {result.status} ID = {result.id} Error = {result.error}")
+        for result in results:
+            # TODO: check this runs good
+            logger.info(f"Status = {result.status} ID = {result.id} Error = {result.error}")
 
-    return True
+        return True
 
 
 from optparse import OptionParser
@@ -261,8 +282,13 @@ if __name__ == '__main__':
 
     if options.init:
         logger.info("Init database")
-        init_feeds()
+        loader = Loader()
+        loader.init_feeds()
     if options.run:
         loader = Loader()
-        for a_feed in loader.get_IP_phish():
-            logger.info(f'Got feed {a_feed.name}')
+        for result in loader.get_IP_phish():
+            (a_feed, sdos, observations) = result
+            logger.info(f'Created Feed: Name = {a_feed.name} Total content {len(a_feed.contents)}')
+            logger.info(f'Total SDOs: {len(sdos)}')
+
+
