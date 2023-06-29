@@ -1,0 +1,17 @@
+version: "3.8"
+
+services:
+  typedb:
+    image: vaticle/typedb:latest
+    ports:
+      - "1729:1729"
+
+  connection:
+    image: osthreat/osintel:test
+    working_dir: /app
+    build:
+      target: base
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - typedb
