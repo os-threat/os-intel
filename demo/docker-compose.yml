@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   typedb:
-    image: vaticle/typedb:latest
+    image: vaticle/typedb:2.18.0
     ports:
       - "1729:1729"
 

@@ -31,17 +31,20 @@ url_typedb = {
 class Loader():
     ROOT_URL = 'https://raw.githubusercontent.com/mitchellkrogza/Phishing.Database/master'
 
-    def __init__(self):
+    def __init__(self,sink:TypeDBSink):
         self.author = Identity(
             name="Phishing Database",
             identity_class="organization",
         )
-    def get_IP_phish(self)->Feed:
+
+        self._sink = sink
+    def add_IP_phish(self)->Feed:
 
         for status in ['ACTIVE','INACTIVE','INVALID']:
             logger.info(f'IP {status}')
             r = requests.get(f"{self.ROOT_URL}/phishing-IPs-{status}.txt")
-            observables = []
+
+            observedData = []
             sdos = []
             total = 0
             if r.status_code == 200:
@@ -53,25 +56,33 @@ class Loader():
                         try:
                             if validators.ip_address.ipv4(ipstr):
                                 sdo = IPv4Address(value=ipstr)
-                                observables.append(sdo)
+
+                                observation = ObservedData(
+                                    first_observed=utils.get_timestamp(),
+                                    last_observed=utils.get_timestamp(),
+                                    number_observed=1,
+                                    created_by_ref=self.author,
+                                    object_refs=[sdo]
+                                )
+
+                                observedData.append(observation)
                                 sdos.append(sdo)
 
                             elif validators.ip_address.ipv6(ipstr):
                                 sdo = IPv6Address(value=ipstr)
-                                observables.append(sdo)
+                                observation = ObservedData(
+                                    first_observed=utils.get_timestamp(),
+                                    last_observed=utils.get_timestamp(),
+                                    number_observed=1,
+                                    created_by_ref=self.author,
+                                    object_refs=[sdo]
+                                )
+
+                                observedData.append(observation)
                                 sdos.append(sdo)
 
                         except Exception as e:
                             logger.error(e)
-
-                assert len(observables) > 0
-                observations = ObservedData(
-                    first_observed=utils.get_timestamp(),
-                    last_observed=utils.get_timestamp(),
-                    number_observed=len(observables),
-                    created_by_ref=self.author,
-                    object_refs=observables
-                )
 
                 subobs = []
                 for sdo in sdos:
@@ -82,7 +93,6 @@ class Loader():
                     )
 
                     subobs.append(subobj)
-
 
                 info = ExternalReference(source_name=f"Phishing Database {status}",
                                          external_id=f"phishing-IPs-{status}.txt",
@@ -105,13 +115,11 @@ class Loader():
                               external_references=[info],
                               object_marking_refs=[marking_def_statement],
                               contents=subobs)
-
-                yield (a_feed,sdos,observations)
-
+                # logically let's put the correct order
+                results= self._sink.add([info,marking_def_statement,sdos,observedData,subobs,a_feed])
+                # check the progress....
             else:
                 raise Exception('Feed URL is down')
-
-
 
     def get_domain_phish(self,add_indicators=False):
 
@@ -256,7 +264,7 @@ class Loader():
                       object_marking_refs = [marking_def_statement],
                       contained=[])
 
-        results = typedb_sink.add(feeds)
+        results = typedb_sink.add([ip_a,ip_ia,ip_in,marking_def_statement,feeds])
 
         for result in results:
             # TODO: check this runs good
@@ -281,14 +289,22 @@ if __name__ == '__main__':
     (options, args) = parser.parse_args()
 
     if options.init:
+        import_type = import_type_factory.get_all_imports()
+
+        typedb_sink = TypeDBSink(url_typedb, True, import_type)
+
+        loader = Loader(typedb_sink)
+
         logger.info("Init database")
-        loader = Loader()
+        loader = Loader(typedb_sink)
         loader.init_feeds()
     if options.run:
-        loader = Loader()
-        for result in loader.get_IP_phish():
-            (a_feed, sdos, observations) = result
-            logger.info(f'Created Feed: Name = {a_feed.name} Total content {len(a_feed.contents)}')
-            logger.info(f'Total SDOs: {len(sdos)}')
 
+        import_type = import_type_factory.get_all_imports()
+
+        typedb_sink = TypeDBSink(url_typedb, True, import_type)
+
+        loader = Loader(typedb_sink)
+
+        loader.add_IP_phish()
 
