@@ -725,12 +725,33 @@ def test_feeds():
     datetime3 = dateutil.parser.isoparse("2020-10-21T01:01:01.000Z")
     typedb_source = TypeDBSource(connection, import_type)
     typedb_sink = TypeDBSink(connection, True, import_type)
-    with open(osthreat, mode="r", encoding="utf-8") as f:
-        json_text = json.load(f)
-        # first lets create the feed
-        feed_id = create_feed(json_text[0], typedb_sink, datetime1)
-        print(f'feed id -> {feed_id}')
-        update_feed(feed_id, json_text[1], datetime2, typedb_source, typedb_sink)
+
+    json_data =[
+      [
+        "127.0.0.1",
+        "196.0.0.1",
+        "226.98.34.2",
+        "135.32.43.54"
+      ],
+      [
+        "127.0.0.1",
+        "196.0.0.1",
+        "226.98.34.20",
+        "135.32.43.54"
+      ],
+      [
+        "127.0.0.1",
+        "196.0.0.1",
+        "226.98.34.20",
+        "135.32.43.54",
+        "127.3.2.15"
+      ]
+    ]
+
+    # first lets create the feed
+    feed_id = create_feed(json_data[0], typedb_sink, datetime1)
+    print(f'feed id -> {feed_id}')
+    update_feed(feed_id, json_data[1], datetime2, typedb_source, typedb_sink)
 
 
 def update_feed(feed_id, local_list, loc_datetime, typedb_source, typedb_sink):
