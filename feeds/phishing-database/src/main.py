@@ -254,6 +254,7 @@ class Loader():
                                  url="https://github.com/mitchellkrogza/Phishing.Database/blob/master/phishing-IPs-INVALID.txt")
 
         # create the Feeds object
+        '''
         feeds = Feeds(name='phishing-db',
                       description="the phishing database",
                       paid=False,
@@ -265,6 +266,18 @@ class Loader():
                       contained=[])
 
         results = typedb_sink.add([ip_a,ip_ia,ip_in,marking_def_statement,feeds])
+        '''
+
+        feeds = Feeds(name='phishing-db',
+                      description="the phishing database",
+                      paid=False,
+                      free=True,
+                      labels=["active","inactive","invalid","ip"],
+                      lang="en",
+                      #object_marking_refs = [marking_def_statement],
+                      contained=[])
+
+        results = typedb_sink.add([feeds])
 
         for result in results:
             # TODO: check this runs good
